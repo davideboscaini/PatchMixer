@@ -6,12 +6,14 @@ import os
 import shutil
 import random
 import warnings
+import time
 
 import numpy as np
 
 import torch
 import torchvision
 import torchinfo
+from torch.utils.tensorboard import SummaryWriter
 
 from augmentations import center, scale1, scale2, jitter1, jitter2, rotate1, rotate2, scale_and_translate
 from datasets import get_dataset
@@ -34,7 +36,7 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=None, help='Fix random seed')
 
     # Train
-    parser.add_argument('--bs', type=int, default=1, help='Batch size')
+    parser.add_argument('--bs', type=int, default=32, help='Batch size')
     parser.add_argument('--start_epoch', type=int, default=0, help='Manual epoch number (useful on restarts)')
     parser.add_argument('--n_epochs', type=int, default=200, help='Number of epochs')
     parser.add_argument('--freq_train', type=int, default=1, help='Frequence at which log training')
@@ -46,7 +48,7 @@ def parse_args():
     parser.add_argument('--dataset_type', type=str, required=True, help='Which dataset to use')
     parser.add_argument('--n_verts', type=int, default=2048, help='Number of input samples')
     parser.add_argument('--flag_voxel', default=False, action='store_true', help='Use voxelization for the patch embedding')
-    parser.add_argument('--variant', type=str, default=None, help='')
+    parser.add_argument('--variant', type=str, default=None)  # TODO What is this? I don't remember...
 
     # Augmentations
     parser.add_argument('--augms', type=str, default=None, help='Sequence of data augmentation techniques to use (separated by commas)')
