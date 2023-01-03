@@ -5,3 +5,19 @@
 | Real RealSense &xrarr; Real Kinect | Real Kinect &xrarr; Real RealSense |
 |:---:|:---:|
 | ![](rr_rk.png "From Real RealSense to Real Kinect") | ![](rk_rr.png "From Real Kinect to Real RealSense") |
+
+### Data
+
+Create a softlink to the dataset folder:
+
+```bash
+ln -s /storage/TEV/dboscaini/PatchMixer_data data
+```
+
+Create experiment folders:
+
+```bash
+mkdir data/exps/
+mkdir data/exps/runs
+mkdir data/exps/weights
+```
