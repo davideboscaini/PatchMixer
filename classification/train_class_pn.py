@@ -105,8 +105,8 @@ def main():
     os.makedirs(args.path_weights, exist_ok=True)
 
     # Save the current model as backup
-    os.system('cp ../models_pn.py models/{:s}/models_pn_backup.py'.format(args.exp))
-    os.system('" " > models/{:s}/__init__.py'.format(args.exp))
+    os.system('cp ../models_pn.py {:s}/models_pn_backup.py'.format(args.path_weights))
+    os.system('" " > {:s}/__init__.py'.format(args.path_weights))
 
     # Create logger
     logger = get_logger(os.path.join(args.path_weights, 'log_train.txt'))
@@ -144,7 +144,7 @@ def main():
 
 def run_train(args, logger, writer):
 
-    # Get the data augmentation
+    # Get the data augmentations
     transforms_train_list = list()
     transforms_test_list = list()
     if args.augms is not None:
@@ -425,9 +425,9 @@ def run_train(args, logger, writer):
                 epoch_oa_train, epoch_ca_mean_train, epoch_ca_std_train))
             for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] + ax.get_xticklabels() + ax.get_yticklabels()):
                 item.set_fontsize(4)
-            os.makedirs(os.path.join('models', args.exp, 'cm'), exist_ok=True)
+            os.makedirs(os.path.join(args.path_weights, 'cm'), exist_ok=True)
             plt.savefig(
-                os.path.join('models', args.exp, 'cm', 'cm_train_epoch={:04d}.png'.format(epoch)),
+                os.path.join(args.path_weights, 'cm', 'cm_train_epoch={:04d}.png'.format(epoch)),
                 transparent=False, bbox_inches='tight', dpi=300)
             plt.close()
 
@@ -527,9 +527,9 @@ def run_train(args, logger, writer):
                         epoch_oa_test, epoch_ca_mean_test, epoch_ca_std_test))
                     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] + ax.get_xticklabels() + ax.get_yticklabels()):
                         item.set_fontsize(4)
-                    os.makedirs(os.path.join('models', args.exp, 'cm'), exist_ok=True)
+                    os.makedirs(os.path.join(args.path_weights, 'cm'), exist_ok=True)
                     plt.savefig(
-                        os.path.join('models', args.exp, 'cm', 'cm_test_epoch={:04d}.png'.format(epoch)),
+                        os.path.join(args.path_weights, 'cm', 'cm_test_epoch={:04d}.png'.format(epoch)),
                         transparent=False, bbox_inches='tight', dpi=300)
                     plt.close()
 
@@ -543,7 +543,7 @@ def run_train(args, logger, writer):
                         'optim_state_dict': optimizer.state_dict(),
                         'sched_state_dict': scheduler.state_dict(),
                     },
-                    os.path.join('models', args.exp, 'best_oa.pth'))
+                    os.path.join(args.path_weights, 'best_oa.pth'))
                 # TODO if epoch_ca_mean_test >= mca_best:
                 #     mca_best = epoch_ca_mean_test
                 #     torch.save({
@@ -553,7 +553,7 @@ def run_train(args, logger, writer):
                 #         'optim_state_dict': optimizer.state_dict(),
                 #         'sched_state_dict': scheduler.state_dict(),
                 #     },
-                #     os.path.join('models', args.exp, 'best_mca.pth'))
+                #     os.path.join(args.path_weights, 'best_mca.pth'))
 
         # TODO Save the current model
         # if epoch % args.freq_save == 0:
@@ -568,7 +568,7 @@ def run_train(args, logger, writer):
                 'optim_state_dict': optimizer.state_dict(),
                 'sched_state_dict': scheduler.state_dict(),
                 },
-                os.path.join('models', args.exp, 'last.pth'))
+                os.path.join(args.path_weights, 'last.pth'))
 
         # Scheduler step
         if args.scheduler_type == 'plateau':

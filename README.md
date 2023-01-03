@@ -14,7 +14,7 @@ Create a softlink to the dataset folder:
 ln -s /storage/TEV/dboscaini/PatchMixer_data data
 ```
 
-Create experiment folders:
+Create folders for experiment logs:
 
 ```bash
 mkdir data/exps/
