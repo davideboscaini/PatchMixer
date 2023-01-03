@@ -1,6 +1,7 @@
 # Personal
 data
 TODO*
+*.png
 classification/*.sh
 segmentation/*.sh
 

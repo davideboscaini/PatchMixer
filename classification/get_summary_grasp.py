@@ -25,11 +25,13 @@ def main():
     #     if not os.path.isfile(os.path.join('models', exp, 'last.pth')):
     #         shutil.rmtree(os.path.join('models', exp))
 
-    path_file = os.path.join('models', 'summary_grasp.txt')
+    path_weights = os.path.join('..', 'data', 'exps', 'weights')
+
+    path_file = os.path.join(path_weights, 'summary_grasp.txt')
 
     with open(path_file, 'w') as f:
 
-        exps = sorted_alphanumeric(os.listdir('models'))
+        exps = sorted_alphanumeric(os.listdir(path_weights))
 
         for test in ['rr10', 'rk10']:
 
@@ -50,7 +52,7 @@ def main():
 
                     for train in ['rk10', 'rr10', 'sk10', 'sr10']:
 
-                        path_log = os.path.join('models', 'grasp_{:s}_{:s}'.format(train, exp_name))
+                        path_log = os.path.join(path_weights, 'grasp_{:s}_{:s}'.format(train, exp_name))
 
                         if os.path.exists(path_log) and path_log not in processed_exps:
 

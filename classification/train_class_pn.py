@@ -9,6 +9,9 @@ import warnings
 import time
 
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 import torch
 import torchvision
@@ -568,7 +571,7 @@ def run_train(args, logger, writer):
                 'optim_state_dict': optimizer.state_dict(),
                 'sched_state_dict': scheduler.state_dict(),
                 },
-                os.path.join(args.path_weights, 'last.pth'))
+                os.path.join(args.path_weights, 'epoch={:04d}.pth'.format(epoch)))  # 'last.pth'))
 
         # Scheduler step
         if args.scheduler_type == 'plateau':

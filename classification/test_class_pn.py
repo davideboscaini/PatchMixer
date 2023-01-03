@@ -51,19 +51,20 @@ def main():
     args_test = parse_args()
 
     # Update weights path
-    args.path_weights = os.path.join('..', 'data', 'exps', 'weights', args_test.exp)
+    args_test.path_weights = os.path.join('..', 'data', 'exps', 'weights', args_test.exp)
 
     # Loop over checkpoints
     for f in ['last']:  # 'best_oa', 'best_mca', 'last'
 
-        if not os.path.isfile(os.path.join(args.path_weights, '{:s}.pth'.format(f))):
+        if not os.path.isfile(os.path.join(args_test.path_weights, '{:s}.pth'.format(f))):
             continue
 
         # Load training arguments
-        checkpoint = torch.load(os.path.join(args.path_weights, '{:s}.pth'.format(f)))
+        checkpoint = torch.load(os.path.join(args_test.path_weights, '{:s}.pth'.format(f)))
         args = checkpoint['args']
 
         # Update arguments
+        args.checkpoint = f
         args.exp = args_test.exp
         args.path = args_test.path
         args.dataset_type = args_test.dataset_type
@@ -72,7 +73,7 @@ def main():
         args.variant = args_test.variant
         args.seed = args_test.seed
         args.flag_compute_tsne = args_test.flag_compute_tsne
-        args.checkpoint = f
+        args.path_weights = args_test.path_weights
 
         # Create logger
         if args.variant is None:
