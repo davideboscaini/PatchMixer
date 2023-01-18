@@ -20,8 +20,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from augmentations import center, scale1, scale2, jitter1, jitter2, rotate1, rotate2, scale_and_translate
 from datasets import get_dataset
-from models_pn import pn_class
-from losses import loss_ce, loss_reg, loss_cbce, loss_lsce
+from models_pt import pt_class
+from losses import loss_ce, loss_cbce, loss_lsce
 from utils import get_logger
 
 
@@ -60,15 +60,9 @@ def parse_args():
     parser.add_argument('--max_trans', type=float, default=0.2)
 
     # Model
-    parser.add_argument('--ch', type=int, default=3, help='Input dimension')
     parser.add_argument('--dim', type=int, default=1024, help='Feature dimension')
     parser.add_argument('--n_classes', type=int, required=True, help='Number of classes')
     parser.add_argument('--p_drop', type=float, default=0.3, help='Dropout probability')
-    parser.add_argument('--activation_type', type=str, default='relu', help='Activation type')
-    parser.add_argument('--stn_type', type=str, default='tnet', help='STN type')
-    parser.add_argument('--ftn_type', type=str, default='tnet', help='FTN type')
-    parser.add_argument('--flag_reg_stn', default=False, action='store_true', help='Add regularization loss for the STN')
-    parser.add_argument('--flag_reg_ftn', default=False, action='store_true', help='Add regularization loss for the FTN')
     parser.add_argument('--checkpoint', type=str, help='Model checkpoint')
 
     # Optimizer
@@ -84,9 +78,6 @@ def parse_args():
     parser.add_argument('--loss_type', type=str, default='ce', help='Loss type')
     parser.add_argument('--beta', type=float, default=0.9, help='Class-balanced cross-entropy hyperparam')
     parser.add_argument('--epsilon', type=float, default=0.2, help='Label smoothing hyperparam')
-    parser.add_argument('--mu1', type=float, default=1.0, help='Coefficient of the classification loss')
-    parser.add_argument('--mu2', type=float, default=1.0, help='Coefficient of the regularization loss of the STN')
-    parser.add_argument('--mu3', type=float, default=1.0, help='Coefficient of the regularization loss of the FTN')
 
     args = parser.parse_args()
     return args
@@ -105,7 +96,7 @@ def main():
     os.makedirs(args.path_weights, exist_ok=True)
 
     # Save the current model as backup
-    os.system('cp ../models_pn.py {:s}/models_pn_backup.py'.format(args.path_weights))
+    os.system('cp ../models_pt.py {:s}/models_pt_backup.py'.format(args.path_weights))
     os.system('" " > {:s}/__init__.py'.format(args.path_weights))
 
     # Create logger
@@ -195,7 +186,7 @@ def run_train(args, logger, writer):
         drop_last=False)
 
     # Get the model
-    model = pn_class(args)
+    model = pt_class(args)
 
     # Send the model to the device
     model = model.to(args.device)
@@ -226,7 +217,7 @@ def run_train(args, logger, writer):
     # Get the model summary
     if torch.cuda.device_count() == 1:
         logger.info('Model summary:')
-        stats = torchinfo.summary(model, (args.bs, 3, args.n_verts))
+        stats = torchinfo.summary(model, (args.bs, args.n_verts, 3))
         logger.info(str(stats))
 
     # Get the optimizer
@@ -243,7 +234,14 @@ def run_train(args, logger, writer):
             lr=args.lr,
             betas=(0.9, 0.999),
             eps=1e-08,
-            weight_decay=1e-04)
+            weight_decay=args.w_decay)
+    elif args.optim_type == 'AdamW':
+        optimizer = torch.optim.AdamW(
+            params=params_to_update,
+            lr=args.lr,
+            betas=(0.9, 0.999),
+            eps=1e-08,
+            weight_decay=args.w_decay)
     else:
         raise NotImplementedError
 
@@ -255,6 +253,11 @@ def run_train(args, logger, writer):
             optimizer,
             args.step - 1,
             args.gamma)
+    elif args.scheduler_type == 'multistep':
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=[120, 160],
+            gamma=0.1)
     elif args.scheduler_type == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
@@ -284,12 +287,19 @@ def run_train(args, logger, writer):
         raise NotImplementedError
     criterion1 = criterion1.to(args.device)
 
-    # Get the rotation loss
-    if args.flag_reg_stn or args.flag_reg_ftn:
-        criterion2 = loss_reg()
-        criterion2 = criterion2.to(args.device)
-    else:
-        criterion2 = None
+    # Resume from checkpoint
+    # if args.flag_resume is True:
+    #     if args.checkpoint is not None:
+    #         checkpoint = torch.load(os.path.join('models', args.exp, '{:s}.pth'.format(args.checkpoint)))
+    #         args.start_epoch = checkpoint['epoch']
+    #         if hasattr(model, 'module'):
+    #             model.module.load_state_dict(checkpoint['model_state_dict'])
+    #         else:
+    #             model.load_state_dict(checkpoint['model_state_dict'])
+    #         optimizer.load_state_dict(checkpoint['optim_state_dict'])
+    #         scheduler.load_state_dict(checkpoint['sched_state_dict'])
+    #     else:
+    #         warnings.warn('Missing checkpoint name!')
 
     # Init training stats
     oa_best = 0.0
@@ -305,10 +315,8 @@ def run_train(args, logger, writer):
 
         # Init epoch stats
         running_loss_train = 0.0
-        running_loss1_train = 0.0
-        running_loss2_train = 0.0
-        running_loss3_train = 0.0
-        running_oa_train = 0
+        running_oa_num_train = 0
+        running_oa_den_train = 0
         running_ca_pred_train = torch.zeros(args.n_classes).to(args.device)
         running_ca_target_train = torch.zeros(args.n_classes).to(args.device)
         running_grad_mean = 0.0
@@ -329,8 +337,7 @@ def run_train(args, logger, writer):
             target = target.to(args.device, non_blocking=True)
 
             # Train one iter
-            loss, loss1, loss2, loss3, pred = train_one_iter(
-                input, target, model, criterion1, criterion2, optimizer, args)
+            loss, pred = train_one_iter(input, target, model, criterion1, optimizer, args)
 
             # Compute confusion matrix
             for i, j in zip(target, pred):
@@ -338,10 +345,8 @@ def run_train(args, logger, writer):
 
             # Iteration statistics
             running_loss_train += loss.item() * input.shape[0]
-            running_loss1_train += loss1.item() * input.shape[0]
-            running_loss2_train += loss2.item() * input.shape[0]
-            running_loss3_train += loss3.item() * input.shape[0]
-            running_oa_train += torch.sum(pred == target.squeeze())
+            running_oa_num_train += torch.sum(pred == target.squeeze())
+            running_oa_den_train += len(pred)
             running_ca_pred_train += torch.sum(
                 torch.nn.functional.one_hot(pred, num_classes=args.n_classes) * \
                 torch.nn.functional.one_hot(target, num_classes=args.n_classes), dim=0)
@@ -372,10 +377,7 @@ def run_train(args, logger, writer):
 
         # Epoch statistics
         epoch_loss_train = running_loss_train / len(loader_train.dataset)
-        epoch_loss1_train = running_loss1_train / len(loader_train.dataset)
-        epoch_loss2_train = running_loss2_train / len(loader_train.dataset)
-        epoch_loss3_train = running_loss3_train / len(loader_train.dataset)
-        epoch_oa_train = running_oa_train.float() / len(loader_train.dataset)
+        epoch_oa_train = running_oa_num_train.float() / running_oa_den_train
         epoch_ca_train = torch.div(running_ca_pred_train, running_ca_target_train)
         epoch_ca_mean_train = torch.mean(epoch_ca_train)
         epoch_ca_std_train = torch.std(epoch_ca_train)
@@ -390,9 +392,6 @@ def run_train(args, logger, writer):
 
         # Log to tensorboard
         writer.add_scalar('Train/Loss', epoch_loss_train, epoch)
-        writer.add_scalar('Train/Loss class', epoch_loss1_train, epoch)
-        writer.add_scalar('Train/Loss reg STN', epoch_loss2_train, epoch)
-        writer.add_scalar('Train/Loss reg FTN', epoch_loss3_train, epoch)
         writer.add_scalar('Train/* Overall Acc.', epoch_oa_train, epoch)
         writer.add_scalar('Train/* Overall Acc. best', epoch_oa_train_best, epoch)
         writer.add_scalar('Train/Class Acc. mean', epoch_ca_mean_train, epoch)
@@ -437,10 +436,8 @@ def run_train(args, logger, writer):
 
                 # Init test
                 running_loss_test = 0.0
-                running_loss1_test = 0.0
-                running_loss2_test = 0.0
-                running_loss3_test = 0.0
-                running_oa_test = 0
+                running_oa_num_test = 0
+                running_oa_den_test = 0
                 running_ca_pred_test = torch.zeros(args.n_classes).to(args.device)
                 running_ca_target_test = torch.zeros(args.n_classes).to(args.device)
                 since_epoch_test = time.time()
@@ -459,8 +456,7 @@ def run_train(args, logger, writer):
                     target = target.to(args.device, non_blocking=True)
 
                     # Test one iter
-                    loss, loss1, loss2, loss3, pred = test_one_iter(
-                        input, target, model, criterion1, criterion2, args)
+                    loss, pred = test_one_iter(input, target, model, criterion1, args)
 
                     # Compute confusion matrix
                     for i, j in zip(target, pred):
@@ -468,10 +464,8 @@ def run_train(args, logger, writer):
 
                     # Iteration statistics
                     running_loss_test += loss.item() * input.shape[0]
-                    running_loss1_test += loss1.item() * input.shape[0]
-                    running_loss2_test += loss2.item() * input.shape[0]
-                    running_loss3_test += loss3.item() * input.shape[0]
-                    running_oa_test += torch.sum(pred == target.squeeze())
+                    running_oa_num_test += torch.sum(pred == target.squeeze())
+                    running_oa_den_test += len(pred)
                     running_ca_pred_test += torch.sum(
                         torch.nn.functional.one_hot(pred, num_classes=args.n_classes) * \
                         torch.nn.functional.one_hot(target, num_classes=args.n_classes), dim=0)
@@ -480,10 +474,7 @@ def run_train(args, logger, writer):
 
                 # Epoch statistics
                 epoch_loss_test = running_loss_test / len(loader_test.dataset)
-                epoch_loss1_test = running_loss1_test / len(loader_test.dataset)
-                epoch_loss2_test = running_loss2_test / len(loader_test.dataset)
-                epoch_loss3_test = running_loss3_test / len(loader_test.dataset)
-                epoch_oa_test = running_oa_test.float() / len(loader_test.dataset)
+                epoch_oa_test = running_oa_num_test.float() / running_oa_den_test
                 epoch_ca_test = torch.div(running_ca_pred_test, running_ca_target_test)
                 epoch_ca_mean_test = torch.mean(epoch_ca_test)
                 epoch_ca_std_test = torch.std(epoch_ca_test)
@@ -496,9 +487,6 @@ def run_train(args, logger, writer):
 
                 # Log to tensorboard
                 writer.add_scalar('Test/Loss', epoch_loss_test, epoch)
-                writer.add_scalar('Test/Loss cla', epoch_loss1_test, epoch)
-                writer.add_scalar('Test/Loss reg STN', epoch_loss2_test, epoch)
-                writer.add_scalar('Test/Loss reg FTN', epoch_loss3_test, epoch)
                 writer.add_scalar('Test/* Overall Acc.', epoch_oa_test, epoch)
                 writer.add_scalar('Test/* Overall Acc. best', epoch_oa_test_best, epoch)
                 writer.add_scalar('Test/Class Acc. mean', epoch_ca_mean_test, epoch)
@@ -544,6 +532,7 @@ def run_train(args, logger, writer):
                         'sched_state_dict': scheduler.state_dict(),
                     },
                     os.path.join(args.path_weights, 'best_oa.pth'))
+
                 # TODO if epoch_ca_mean_test >= mca_best:
                 #     mca_best = epoch_ca_mean_test
                 #     torch.save({
@@ -581,7 +570,7 @@ def run_train(args, logger, writer):
     logger.info('Training completed in {:.2f}s'.format(elapsed_train))
 
 
-def train_one_iter(input, target, model, criterion1, criterion2, optimizer, args):
+def train_one_iter(input, target, model, criterion1, optimizer, args):
 
     # Set the model in training mode
     model.train()
@@ -590,26 +579,11 @@ def train_one_iter(input, target, model, criterion1, criterion2, optimizer, args
     optimizer.zero_grad()
 
     # Forward pass
-    logits, _, trans_stn, trans_ftn = model(input)
+    logits = model(input.transpose(1, 2).contiguous())
     _, pred = torch.max(logits, dim=1)
 
     # Classification loss
-    loss1 = criterion1(logits, target)
-
-    # Regularization loss for the STN
-    if criterion2 is not None and args.flag_reg_stn is True:
-        loss2 = criterion2(trans_stn)
-    else:
-        loss2 = torch.tensor(0.0).to(args.device)
-
-    # Regularization loss for the FTN
-    if criterion2 is not None and args.flag_reg_ftn is True:
-        loss3 = criterion2(trans_ftn)
-    else:
-        loss3 = torch.tensor(0.0).to(args.device)
-
-    # Total loss
-    loss = args.mu1 * loss1 + args.mu2 * loss2 + args.mu3 * loss3
+    loss = criterion1(logits, target)
 
     # Back-propagation
     loss.backward()
@@ -617,38 +591,24 @@ def train_one_iter(input, target, model, criterion1, criterion2, optimizer, args
     # Optimizer step
     optimizer.step()
 
-    return loss, args.mu1 * loss1, args.mu2 * loss2, args.mu3 * loss3, pred
+    return loss, pred
 
 
-def test_one_iter(input, target, model, criterion1, criterion2, args):
+def test_one_iter(input, target, model, criterion1, args):
 
     # Set the model in evaluation mode
     model.eval()
 
-    # Forward pass
     with torch.inference_mode():
-        logits, _, trans_stn, trans_ftn = model(input)
+
+        # Forward pass
+        logits = model(input.transpose(1, 2).contiguous())
         _, pred = torch.max(logits, dim=1)
 
-    # Classification loss
-    loss1 = criterion1(logits, target)
+        # Classification loss
+        loss = criterion1(logits, target)
 
-    # Regularization loss for the STN
-    if criterion2 is not None and args.flag_reg_stn is True:
-        loss2 = criterion2(trans_stn)
-    else:
-        loss2 = torch.tensor(0.0).to(args.device)
-
-    # Regularization loss for the FTN
-    if criterion2 is not None and args.flag_reg_ftn is True:
-        loss3 = criterion2(trans_ftn)
-    else:
-        loss3 = torch.tensor(0.0).to(args.device)
-
-    # Total loss
-    loss = args.mu1 * loss1 + args.mu2 * loss2 + args.mu3 * loss3
-
-    return loss, args.mu1 * loss1, args.mu2 * loss2, args.mu3 * loss3, pred
+    return loss, pred
 
 
 if __name__ == '__main__':

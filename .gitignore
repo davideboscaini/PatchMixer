@@ -4,6 +4,7 @@ TODO*
 *.png
 classification/*.sh
 segmentation/*.sh
+point-transformer
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -21,3 +21,11 @@ mkdir data/exps/
 mkdir data/exps/runs
 mkdir data/exps/weights
 ```
+
+Install PointTransformer dependencies:
+
+```bash
+pip install ninja
+cd point-transformer/scene_seg/lib/pointops
+python setup.py install
+```
